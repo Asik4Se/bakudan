@@ -1,0 +1,14 @@
+{
+  "name": "bakudan",
+  "version": "1.0.0",
+  "description": "爆弾回しオンラインゲーム（最大18人・NPC対応）",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

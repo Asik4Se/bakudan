@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BAKUDAN — 爆弾回し</title>
+<meta name="theme-color" content="#16110e">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="conn" class="conn hidden">接続しています…</div>
+<div id="toast" class="toast"></div>
+
+<template id="bombSvg">
+  <svg viewBox="0 0 100 100" aria-hidden="true">
+    <path d="M60 24 C 66 10, 80 8, 86 14" stroke="#c7a073" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <rect x="51" y="19" width="16" height="13" rx="3" transform="rotate(38 59 25)" fill="#4a4e57"/>
+    <circle cx="45" cy="57" r="34" fill="#1c1e24"/>
+    <circle cx="45" cy="57" r="34" fill="url(#bombShade)"/>
+    <ellipse cx="33" cy="42" rx="10" ry="5.5" fill="#fff" opacity=".22" transform="rotate(-38 33 42)"/>
+  </svg>
+</template>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <radialGradient id="bombShade" cx="35%" cy="32%" r="75%">
+      <stop offset="0" stop-color="#6a707d" stop-opacity=".9"/>
+      <stop offset=".5" stop-color="#22252c" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#050507" stop-opacity=".9"/>
+    </radialGradient>
+  </defs>
+</svg>
+
+<!-- ============ TITLE ============ -->
+<main id="scr-title" class="screen">
+  <div class="title-wrap">
+    <div class="logo">
+      <div class="logo-bomb bomb-art"><span class="spark"></span></div>
+      <h1>BAKUDAN</h1>
+      <p class="sub">爆弾回し ── 頭の中で数えろ</p>
+    </div>
+    <div class="card">
+      <label class="field"><span>なまえ</span><input id="inName" maxlength="12" placeholder="12文字まで" autocomplete="nickname"></label>
+      <button id="btnCreate" class="btn primary">部屋を作る</button>
+      <div class="or"><span>または</span></div>
+      <div class="join-row">
+        <input id="inCode" maxlength="4" placeholder="部屋コード" autocapitalize="characters" autocomplete="off" spellcheck="false">
+        <button id="btnJoin" class="btn">参加</button>
+      </div>
+      <label class="check"><input type="checkbox" id="chkSpec"> 観戦で入る</label>
+    </div>
+    <details class="rules" open>
+      <summary>ルール</summary>
+      <ol>
+        <li>爆弾は<b>時計回り</b>に回っていく。</li>
+        <li>爆発までの時間は<b>30〜60秒</b>でランダム。見えるのは<b>最初の5秒だけ</b>。あとは頭の中で数えよう。</li>
+        <li>爆弾を持てるのは<b>最大5秒</b>（ゲージ）。ゲージが切れると自動で次の人へ。</li>
+        <li>爆発したとき持っていた人が脱落。生存者が<b>5人以上</b>なら、<b>ひとつ前に持っていた人</b>も爆風で脱落。</li>
+        <li>最後まで残った1人が勝ち。</li>
+      </ol>
+    </details>
+  </div>
+</main>
+
+<!-- ============ LOBBY ============ -->
+<main id="scr-lobby" class="screen hidden">
+  <div class="lobby-wrap">
+    <header class="lobby-head">
+      <div>
+        <div class="label">部屋コード</div>
+        <div id="lbCode" class="code">----</div>
+      </div>
+      <button id="btnCopy" class="btn small">招待リンクをコピー</button>
+    </header>
+
+    <section class="card">
+      <div class="row-between">
+        <h2>プレイヤー</h2>
+        <span id="lbCount" class="count">0 / 18</span>
+      </div>
+      <ul id="lbPlayers" class="plist"></ul>
+      <div class="npc-ctl">
+        <span class="npc-label">NPC</span>
+        <button id="npcMinus" class="btn round" aria-label="NPCを減らす">−</button>
+        <b id="npcNum">0</b>
+        <button id="npcPlus" class="btn round" aria-label="NPCを増やす">＋</button>
+      </div>
+      <p class="hint">4人に足りない分はNPCが自動で入ります（最大18人）</p>
+    </section>
+
+    <section class="card" id="specCard">
+      <h2>観戦</h2>
+      <ul id="lbSpecs" class="plist small"></ul>
+    </section>
+
+    <div class="lobby-actions">
+      <button id="btnStart" class="btn primary big">ゲーム開始</button>
+      <p id="waitMsg" class="hint tcenter">ホストの開始を待っています…</p>
+      <div class="row-gap">
+        <button id="btnSpec" class="btn">観戦に回る</button>
+        <button id="btnLeave" class="btn ghost">退出</button>
+      </div>
+    </div>
+
+    <details class="rules">
+      <summary>ルール</summary>
+      <ol>
+        <li>爆弾は<b>時計回り</b>に回っていく。</li>
+        <li>爆発までの時間は<b>30〜60秒</b>でランダム。見えるのは<b>最初の5秒だけ</b>。</li>
+        <li>爆弾を持てるのは<b>最大5秒</b>（ゲージ）。切れると自動で次の人へ。</li>
+        <li>爆発時に持っていた人が脱落。生存<b>5人以上</b>なら<b>ひとつ前の人</b>も爆風で脱落。</li>
+        <li>最後の1人が勝ち。</li>
+      </ol>
+    </details>
+  </div>
+</main>
+
+<!-- ============ GAME ============ -->
+<main id="scr-game" class="screen hidden">
+  <header class="topbar">
+    <div class="tb-left">
+      <span id="gRound" class="pill">ROUND 1</span>
+      <span id="gAlive" class="pill">生存 0</span>
+      <span id="gBlast" class="pill blast">爆風あり</span>
+    </div>
+    <div class="tb-right">
+      <button id="btnMute" class="icon-btn" aria-label="音">🔊</button>
+      <button id="btnMenu" class="icon-btn" aria-label="メニュー">⋯</button>
+    </div>
+    <div id="menu" class="menu hidden">
+      <button id="mAbort">ゲームを中断してロビーへ</button>
+      <button id="mLeave">部屋から退出する</button>
+    </div>
+  </header>
+
+  <div class="stage" id="stage">
+    <div id="table" class="table">
+      <div class="felt"></div>
+      <div id="arrows" class="arrows"></div>
+      <div id="seats"></div>
+      <div id="center" class="center">
+        <div id="cLabel" class="c-label"></div>
+        <div id="cMain" class="c-main"></div>
+        <div id="cSub" class="c-sub"></div>
+      </div>
+      <div id="bomb" class="bomb hidden">
+        <div class="bomb-art"><span class="spark"></span></div>
+        <div class="bomb-gauge"><i></i></div>
+      </div>
+      <div id="fx" class="fx"></div>
+    </div>
+  </div>
+
+  <footer class="dock">
+    <div id="dockMsg" class="dock-msg"></div>
+    <div id="holdGauge" class="hold-gauge"><i></i></div>
+    <button id="btnPass" class="btn pass" disabled>回す <span class="arrow">↻</span></button>
+    <div class="key-hint">スペース / Enter でも回せます</div>
+  </footer>
+
+  <div id="overlay" class="overlay hidden">
+    <div class="ov-card">
+      <div class="ov-title">WINNER</div>
+      <div id="ovName" class="ov-name"></div>
+      <ol id="ovRank" class="rank"></ol>
+      <div class="ov-actions">
+        <button id="ovAgain" class="btn primary">もう一度</button>
+        <button id="ovLobby" class="btn">ロビーへ</button>
+        <p id="ovWait" class="hint tcenter">ホストの操作を待っています…</p>
+      </div>
+    </div>
+  </div>
+  <div id="flash" class="flash"></div>
+</main>
+
+<script src="/client.js"></script>
+</body>
+</html>
