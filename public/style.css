@@ -322,3 +322,31 @@ input:focus { border-color: var(--fuse); }
   box-shadow: 0 10px 30px rgba(0,0,0,.5);
 }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- 音の設定 ---------- */
+.overlay.snd { z-index: 40; }
+.snd-card { text-align: left; width: min(460px, 100%); padding: 18px 18px 16px; }
+.snd-head { display: flex; justify-content: space-between; align-items: center; }
+.snd-head h3 { margin: 0; font-family: var(--display); font-weight: 400; font-size: 22px; letter-spacing: .05em; }
+.snd-card > .hint { margin: 6px 0 12px; }
+.ssec { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px 6px; margin-bottom: 10px; background: rgba(255,255,255,.025); }
+.ssec-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.ssec-head h4 { margin: 0; font-size: 14.5px; }
+.btn.sample { padding: 6px 12px; font-size: 13px; background: #3a2a1f; border-color: #5a3e2c; color: var(--fuse2); flex: 0 0 auto; }
+.srow { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; padding: 6px 0; font-size: 13px; }
+.srow .sl { color: var(--muted); grid-column: 1; }
+.srow output { grid-column: 2; grid-row: 1; font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--text); }
+.srow input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--fuse); height: 26px; margin: 0; }
+.srow select {
+  grid-column: 2; grid-row: 1; background: #140f0c; color: var(--text); border: 1px solid var(--line);
+  border-radius: 9px; padding: 7px 10px; font-size: 14px; font-family: inherit;
+}
+.srow.toggle { cursor: pointer; }
+.srow.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.srow .sw { grid-column: 2; grid-row: 1; width: 44px; height: 26px; border-radius: 13px; background: #3a2e26; position: relative; transition: background .15s; }
+.srow .sw::after { content: ''; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #cbbfb3; transition: transform .15s; }
+.srow.toggle input:checked + .sw { background: var(--fuse); }
+.srow.toggle input:checked + .sw::after { transform: translateX(18px); background: #fff; }
+.snd-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; }
+.snd-foot .btn.primary { flex: 1; }
+.title-wrap > .open-sound { align-self: center; }

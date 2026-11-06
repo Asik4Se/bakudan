@@ -52,6 +52,7 @@
       </div>
       <label class="check"><input type="checkbox" id="chkSpec"> 観戦で入る</label>
     </div>
+    <button class="btn ghost open-sound">🔊 音の設定</button>
     <details class="rules" open>
       <summary>ルール</summary>
       <ol>
@@ -101,6 +102,7 @@
       <p id="waitMsg" class="hint tcenter">ホストの開始を待っています…</p>
       <div class="row-gap">
         <button id="btnSpec" class="btn">観戦に回る</button>
+        <button class="btn open-sound">🔊 音</button>
         <button id="btnLeave" class="btn ghost">退出</button>
       </div>
     </div>
@@ -131,6 +133,7 @@
       <button id="btnMenu" class="icon-btn" aria-label="メニュー">⋯</button>
     </div>
     <div id="menu" class="menu hidden">
+      <button class="open-sound">🔊 音の設定</button>
       <button id="mAbort">ゲームを中断してロビーへ</button>
       <button id="mLeave">部屋から退出する</button>
     </div>
@@ -175,6 +178,22 @@
   </div>
   <div id="flash" class="flash"></div>
 </main>
+
+<!-- ============ 音の設定 ============ -->
+<div id="sndPanel" class="overlay snd hidden">
+  <div class="ov-card snd-card" role="dialog" aria-label="音の設定">
+    <div class="snd-head">
+      <h3>音の設定</h3>
+      <button id="sndClose" class="icon-btn" aria-label="閉じる">✕</button>
+    </div>
+    <p class="hint">▶ 試聴で今の設定の音が鳴ります。スライダーを離したときも鳴ります。</p>
+    <div id="sndBody"></div>
+    <div class="snd-foot">
+      <button id="sndReset" class="btn ghost small">初期値に戻す</button>
+      <button id="sndDone" class="btn primary">閉じる</button>
+    </div>
+  </div>
+</div>
 
 <script src="/client.js"></script>
 </body>

@@ -23,17 +23,68 @@ const bombTpl = $('#bombSvg');
 document.querySelectorAll('.bomb-art').forEach((el) => el.prepend(bombTpl.content.cloneNode(true)));
 
 // ---------------------------------------------------------------- 音
+// 音の設定（ローカルに保存）
+const SND_DEFAULT = {
+  master: { vol: 80, muted: false, vib: true },
+  boom: { vol: 90, type: 'standard', len: 1.4, bass: 70, tone: 60 },
+  pass: { vol: 60, wave: 'triangle', pitch: 420 },
+  mine: { vol: 70, wave: 'square', pitch: 880 },
+  count: { vol: 60 },
+  win: { vol: 70 },
+};
+function loadSoundCfg() {
+  const cfg = JSON.parse(JSON.stringify(SND_DEFAULT));
+  try {
+    const saved = JSON.parse(store.get('bk_sound', '{}'));
+    for (const sec of Object.keys(cfg)) {
+      if (saved[sec] && typeof saved[sec] === 'object') {
+        for (const k of Object.keys(cfg[sec])) {
+          if (typeof saved[sec][k] === typeof cfg[sec][k]) cfg[sec][k] = saved[sec][k];
+        }
+      }
+    }
+  } catch { /* ignore */ }
+  if (store.get('bk_mute') === '1') { cfg.master.muted = true; store.del('bk_mute'); }
+  return cfg;
+}
+
 const Sound = {
   ctx: null,
-  muted: store.get('bk_mute') === '1',
+  bus: null,
+  cfg: loadSoundCfg(),
+  get muted() { return this.cfg.master.muted; },
+  save() { store.set('bk_sound', JSON.stringify(this.cfg)); },
   init() {
     if (!this.ctx) {
-      try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* ignore */ }
+      try {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        // 音割れ防止のコンプレッサー → 全体音量
+        const comp = this.ctx.createDynamicsCompressor();
+        comp.threshold.value = -10; comp.knee.value = 8; comp.ratio.value = 6;
+        comp.attack.value = 0.003; comp.release.value = 0.2;
+        this.bus = this.ctx.createGain();
+        this.bus.connect(comp).connect(this.ctx.destination);
+        this.applyMaster();
+      } catch { this.ctx = null; }
     }
     if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
   },
-  tone(f, d, type = 'square', v = 0.06, at = 0, f2 = 0) {
-    if (this.muted || !this.ctx) return;
+  applyMaster() {
+    if (!this.bus) return;
+    const m = this.cfg.master;
+    this.bus.gain.value = m.muted ? 0 : (m.vol / 100) ** 2;
+  },
+  // 各音の出力先（音量つき）。鳴らせないときは null
+  out(vol) {
+    this.init();
+    if (!this.ctx || this.muted || vol <= 0) return null;
+    const g = this.ctx.createGain();
+    g.gain.value = (vol / 100) ** 2 * 1.6;
+    g.connect(this.bus);
+    return g;
+  },
+  tone(dest, f, d, type = 'square', v = 0.06, at = 0, f2 = 0) {
+    if (!dest) return;
     const c = this.ctx, t = c.currentTime + at;
     const o = c.createOscillator(), g = c.createGain();
     o.type = type;
@@ -42,31 +93,139 @@ const Sound = {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(v, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-    o.connect(g).connect(c.destination);
-    o.start(t); o.stop(t + d + 0.03);
+    o.connect(g).connect(dest);
+    o.start(t); o.stop(t + d + 0.05);
   },
-  pass() { this.tone(420, 0.05, 'triangle', 0.08); this.tone(640, 0.05, 'triangle', 0.06, 0.04); },
-  mine() { this.tone(880, 0.07, 'square', 0.06); this.tone(1320, 0.1, 'square', 0.06, 0.08); },
-  beep(hi) { this.tone(hi ? 1046 : 660, 0.14, 'sine', 0.14); },
-  hide() { this.tone(520, 0.25, 'sine', 0.1, 0, 260); },
-  boom() {
-    if (this.muted || !this.ctx) return;
-    const c = this.ctx, t = c.currentTime, len = Math.floor(c.sampleRate * 1.5);
+  // 減衰するノイズ（hold > 1 でサンプルホールド＝8bit風のザラザラ）
+  noise(dest, dur, pow, hold = 1) {
+    const c = this.ctx, len = Math.max(1, Math.floor(c.sampleRate * dur));
     const buf = c.createBuffer(1, len, c.sampleRate);
     const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.4);
-    const src = c.createBufferSource(); src.buffer = buf;
-    const lp = c.createBiquadFilter(); lp.type = 'lowpass';
-    lp.frequency.setValueAtTime(3000, t); lp.frequency.exponentialRampToValueAtTime(160, t + 1.3);
-    const g = c.createGain(); g.gain.value = 0.7;
-    src.connect(lp).connect(g).connect(c.destination);
-    src.start(t);
-    this.tone(120, 1.0, 'sine', 0.6, 0, 28);
+    let v = 0;
+    for (let i = 0; i < len; i++) {
+      if (i % hold === 0) v = Math.random() * 2 - 1;
+      d[i] = v * Math.pow(1 - i / len, pow);
+    }
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    return src;
   },
-  win() { [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.18, 'triangle', 0.1, i * 0.12)); },
+  pass() {
+    const o = this.cfg.pass, dest = this.out(o.vol);
+    this.tone(dest, o.pitch, 0.06, o.wave, 0.35);
+    this.tone(dest, o.pitch * 1.5, 0.06, o.wave, 0.28, 0.045);
+  },
+  mine() {
+    const o = this.cfg.mine, dest = this.out(o.vol);
+    this.tone(dest, o.pitch, 0.08, o.wave, 0.3);
+    this.tone(dest, o.pitch * 1.5, 0.12, o.wave, 0.3, 0.08);
+  },
+  beep(hi) { this.tone(this.out(this.cfg.count.vol), hi ? 1046 : 660, 0.16, 'sine', 0.45); },
+  hide() { this.tone(this.out(this.cfg.count.vol), 520, 0.3, 'sine', 0.35, 0, 260); },
+  boom() {
+    const o = this.cfg.boom, dest = this.out(o.vol);
+    if (!dest) return;
+    const c = this.ctx, t = c.currentTime;
+    const len = o.len;
+    const bass = o.bass / 100;
+    const bright = 300 + (o.tone / 100) ** 2 * 7000; // こもり ⇔ 派手
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    const ng = c.createGain();
+    let src;
+    switch (o.type) {
+      case 'heavy': // 重低音：長くこもった轟音
+        src = this.noise(dest, len * 1.2, 1.6);
+        lp.frequency.setValueAtTime(bright * 0.5, t);
+        lp.frequency.exponentialRampToValueAtTime(70, t + len);
+        ng.gain.value = 0.75;
+        this.tone(dest, 75, len, 'sine', 1.0 * bass + 0.0002, 0, 18);
+        this.tone(dest, 45, len * 1.2, 'sine', 0.7 * bass + 0.0002, 0.03, 20);
+        break;
+      case 'crack': // 乾いた破裂：短く鋭い
+        src = this.noise(dest, len * 0.5, 4);
+        lp.frequency.setValueAtTime(Math.min(14000, bright * 1.6), t);
+        lp.frequency.exponentialRampToValueAtTime(700, t + len * 0.45);
+        ng.gain.value = 1.4;
+        this.tone(dest, 1800, 0.03, 'square', 0.25, 0, 300);
+        this.tone(dest, 200, Math.min(0.4, len * 0.3), 'sine', 0.5 * bass + 0.0002, 0, 50);
+        break;
+      case 'retro': // 8bit 風
+        src = this.noise(dest, len, 1.8, 28);
+        lp.frequency.setValueAtTime(bright, t);
+        lp.frequency.exponentialRampToValueAtTime(200, t + len);
+        ng.gain.value = 0.7;
+        this.tone(dest, 220, len * 0.6, 'square', 0.22 * bass + 0.0002, 0, 35);
+        break;
+      default: // ドカン（標準）
+        src = this.noise(dest, len * 1.05, 2.4);
+        lp.frequency.setValueAtTime(bright, t);
+        lp.frequency.exponentialRampToValueAtTime(160, t + len * 0.9);
+        ng.gain.value = 0.7;
+        this.tone(dest, 120, len * 0.7, 'sine', 0.75 * bass + 0.0002, 0, 28);
+        break;
+    }
+    src.connect(lp).connect(ng).connect(dest);
+    src.start(t);
+  },
+  win() {
+    const dest = this.out(this.cfg.win.vol);
+    [523, 659, 784, 1046].forEach((f, i) => this.tone(dest, f, 0.2, 'triangle', 0.32, i * 0.12));
+  },
+  // 設定画面のサンプル再生
+  sample(sec) {
+    switch (sec) {
+      case 'master': this.pass(); setTimeout(() => this.boom(), 250); break;
+      case 'boom': this.boom(); vibrate([90]); break;
+      case 'pass': this.pass(); setTimeout(() => this.pass(), 220); setTimeout(() => this.pass(), 440); break;
+      case 'mine': this.mine(); vibrate(35); break;
+      case 'count':
+        [0, 1, 2].forEach((i) => setTimeout(() => this.beep(false), i * 450));
+        setTimeout(() => this.beep(true), 1350);
+        setTimeout(() => this.hide(), 2100);
+        break;
+      case 'win': this.win(); break;
+      default: break;
+    }
+  },
 };
 ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => window.addEventListener(ev, () => Sound.init(), { passive: true }));
-const vibrate = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch { /* ignore */ } };
+function vibrate(p) {
+  if (!Sound.cfg.master.vib) return;
+  try { navigator.vibrate && navigator.vibrate(p); } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------- 音の設定画面
+const SND_UI = [
+  { sec: 'master', title: '全体', rows: [
+    ['vol', 'range', '全体の音量', 0, 100, 1, '%'],
+    ['muted', 'toggle', 'すべての音を消す'],
+    ['vib', 'toggle', 'バイブレーション（スマホ）'],
+  ] },
+  { sec: 'boom', title: '💥 爆発音', rows: [
+    ['vol', 'range', '音量', 0, 100, 1, '%'],
+    ['type', 'select', '種類', [['standard', 'ドカン（標準）'], ['heavy', '重低音'], ['crack', '乾いた破裂'], ['retro', 'レトロ（8bit）']]],
+    ['len', 'range', '長さ', 0.4, 3, 0.1, '秒'],
+    ['bass', 'range', '低音の強さ', 0, 100, 1, '%'],
+    ['tone', 'range', '明るさ（こもり ⇔ 派手）', 0, 100, 1, '%'],
+  ] },
+  { sec: 'pass', title: '💣 爆弾が回る音', rows: [
+    ['vol', 'range', '音量', 0, 100, 1, '%'],
+    ['wave', 'select', '音色', [['triangle', 'やわらか'], ['sine', 'まるい'], ['square', 'ピコピコ'], ['sawtooth', 'ジャリッ']]],
+    ['pitch', 'range', '高さ', 200, 1200, 10, 'Hz'],
+  ] },
+  { sec: 'mine', title: '⚠ 自分に回ってきた音', rows: [
+    ['vol', 'range', '音量', 0, 100, 1, '%'],
+    ['wave', 'select', '音色', [['square', 'ピコピコ'], ['triangle', 'やわらか'], ['sine', 'まるい'], ['sawtooth', 'ジャリッ']]],
+    ['pitch', 'range', '高さ', 400, 1800, 10, 'Hz'],
+  ] },
+  { sec: 'count', title: '⏱ カウント音（開始前・表示が消える合図）', rows: [
+    ['vol', 'range', '音量', 0, 100, 1, '%'],
+  ] },
+  { sec: 'win', title: '🏆 勝利の音', rows: [
+    ['vol', 'range', '音量', 0, 100, 1, '%'],
+  ] },
+];
 
 // ---------------------------------------------------------------- 通信
 let ws = null, wsOpen = false, retry = 0, noReconnect = false;
@@ -616,15 +775,76 @@ btnPass.addEventListener('click', (e) => e.preventDefault());
 bombEl.addEventListener('pointerdown', () => doPass());
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
-  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+  if (document.activeElement && /^(INPUT|SELECT)$/.test(document.activeElement.tagName)) return;
+  if (!$('#sndPanel').classList.contains('hidden')) return;
   if (e.code === 'Space' || e.key === 'Enter') {
     if (S && S.phase !== 'lobby') { e.preventDefault(); doPass(); }
   }
 });
 
+// ---- 音の設定パネル
 const updMute = () => { $('#btnMute').textContent = Sound.muted ? '🔇' : '🔊'; };
+const fmtVal = (v, step, unit) => (step < 1 ? Number(v).toFixed(1) : String(v)) + (unit || '');
+
+function buildSoundPanel() {
+  const body = $('#sndBody');
+  body.innerHTML = SND_UI.map((s) => {
+    const rows = s.rows.map(([k, type, label, a, b, step, unit]) => {
+      const v = Sound.cfg[s.sec][k];
+      const attr = `data-sec="${s.sec}" data-k="${k}"`;
+      if (type === 'range') {
+        return `<label class="srow"><span class="sl">${label}</span>` +
+          `<input type="range" ${attr} min="${a}" max="${b}" step="${step}" value="${v}">` +
+          `<output>${fmtVal(v, step, unit)}</output></label>`;
+      }
+      if (type === 'select') {
+        return `<label class="srow"><span class="sl">${label}</span><select ${attr}>` +
+          a.map(([val, txt]) => `<option value="${val}"${val === v ? ' selected' : ''}>${txt}</option>`).join('') +
+          `</select></label>`;
+      }
+      return `<label class="srow toggle"><span class="sl">${label}</span><input type="checkbox" ${attr}${v ? ' checked' : ''}><i class="sw"></i></label>`;
+    }).join('');
+    return `<section class="ssec"><div class="ssec-head"><h4>${s.title}</h4>` +
+      `<button class="btn small sample" data-sample="${s.sec}">▶ 試聴</button></div>${rows}</section>`;
+  }).join('');
+}
+
+function onSoundInput(e, play) {
+  const el = e.target;
+  const { sec, k } = el.dataset;
+  if (!sec) return;
+  const row = SND_UI.find((s) => s.sec === sec).rows.find((r) => r[0] === k);
+  let v;
+  if (el.type === 'checkbox') v = el.checked;
+  else if (el.type === 'range') v = Number(el.value);
+  else v = el.value;
+  Sound.cfg[sec][k] = v;
+  if (el.type === 'range') el.nextElementSibling.textContent = fmtVal(v, row[5], row[6]);
+  Sound.save();
+  if (sec === 'master') { Sound.applyMaster(); updMute(); }
+  // スライダーを離したとき・種類を変えたときにその音を鳴らして確認
+  if (play && !(sec === 'master' && k !== 'vol')) Sound.sample(sec);
+}
+$('#sndBody').addEventListener('input', (e) => onSoundInput(e, false));
+$('#sndBody').addEventListener('change', (e) => onSoundInput(e, true));
+$('#sndBody').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-sample]');
+  if (b) { Sound.init(); Sound.sample(b.dataset.sample); }
+});
+function openSound() { buildSoundPanel(); $('#sndPanel').classList.remove('hidden'); $('#menu').classList.add('hidden'); }
+function closeSound() { $('#sndPanel').classList.add('hidden'); }
+$('#sndClose').onclick = closeSound;
+$('#sndDone').onclick = closeSound;
+$('#sndPanel').addEventListener('pointerdown', (e) => { if (e.target.id === 'sndPanel') closeSound(); });
+$('#sndReset').onclick = () => {
+  if (!confirm('音の設定を初期値に戻しますか？')) return;
+  Sound.cfg = JSON.parse(JSON.stringify(SND_DEFAULT));
+  Sound.save(); Sound.applyMaster(); updMute(); buildSoundPanel();
+};
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSound(); });
+document.querySelectorAll('.open-sound').forEach((b) => { b.onclick = openSound; });
 updMute();
-$('#btnMute').onclick = () => { Sound.muted = !Sound.muted; store.set('bk_mute', Sound.muted ? '1' : '0'); updMute(); };
+$('#btnMute').onclick = openSound;
 $('#btnMenu').onclick = (e) => { e.stopPropagation(); $('#menu').classList.toggle('hidden'); };
 document.addEventListener('click', () => $('#menu').classList.add('hidden'));
 $('#mAbort').onclick = () => { if (confirm('ゲームを中断してロビーに戻りますか？')) send({ t: 'tolobby' }); };
